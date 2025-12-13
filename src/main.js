@@ -1,6 +1,6 @@
 // Markdown Maker - Convert web pages to clean, AI-ready markdown
 import { Actor } from 'apify';
-import { PlaywrightCrawler } from 'crawlee';
+import { PlaywrightCrawler, requestAsBrowser } from 'crawlee';
 import TurndownService from 'turndown';
 import { extractFromHtml } from '@extractus/article-extractor';
 import { load } from 'cheerio';
@@ -9,7 +9,31 @@ const normalizeHtmlForMarkdown = (html, baseUrl) => {
     const $ = load(html || '', { decodeEntities: false });
 
     // Strip out obvious non-content tags before markdown conversion
-    $('script, style, noscript').remove();
+    $('script, style, noscript, iframe, template').remove();
+
+    const noiseSelectors = [
+        'nav',
+        'header',
+        'footer',
+        'aside',
+        '.sidebar',
+        '.advertisement',
+        '.ads',
+        '.ad',
+        '.promo',
+        '.newsletter',
+        '.subscribe',
+        '.share',
+        '.social',
+        '.breadcrumb',
+        '.breadcrumbs',
+        '.comment',
+        '.comments',
+        '.cookie',
+        '.modal',
+        '.popup',
+    ];
+    $(noiseSelectors.join(',')).remove();
 
     const toAbsolute = (value) => {
         if (!value) return null;
@@ -63,6 +87,96 @@ const normalizeHtmlForMarkdown = (html, baseUrl) => {
 
     const bodyHtml = $('body').html();
     return bodyHtml !== null && bodyHtml !== undefined ? bodyHtml : $.root().html() || '';
+};
+
+const CONTENT_SELECTORS = [
+    'article',
+    'main',
+    '[role="main"]',
+    '.main-content',
+    '.content',
+    '#content',
+    '.post-content',
+    '.entry-content',
+    '.article-content',
+    '.article-body',
+    '.blog-post',
+    '.markdown-body',
+    '.docs-main',
+    '.documentation',
+];
+
+const pickMainContent = (html) => {
+    const $ = load(html || '', { decodeEntities: false });
+    const getLength = (el) => {
+        const text = $(el).text().replace(/\s+/g, ' ').trim();
+        return text.length;
+    };
+
+    let bestHtml = null;
+    let bestLength = 0;
+
+    for (const selector of CONTENT_SELECTORS) {
+        $(selector).each((_, el) => {
+            const len = getLength(el);
+            if (len > bestLength && len > 120) {
+                bestLength = len;
+                bestHtml = $(el).html();
+            }
+        });
+        if (bestHtml) break;
+    }
+
+    const titleFromDom = $('title').first().text().trim() || null;
+    const mainHtml = bestHtml || $('body').html() || $.root().html() || '';
+
+    return { mainHtml, titleFromDom };
+};
+
+const isBlockedResponse = (statusCode, body) => {
+    if (statusCode && statusCode >= 400) return true;
+    if (!body) return true;
+
+    const sample = body.slice(0, 2000).toLowerCase();
+    const blockSignals = [
+        'access denied',
+        'forbidden',
+        'unauthorized',
+        'captcha',
+        'verify you are human',
+        'bot detection',
+        'temporary rate limit',
+        'cloudflare',
+    ];
+
+    return blockSignals.some(signal => sample.includes(signal));
+};
+
+const buildMarkdownFromHtml = async (html, url, turndownService, titleFallback = 'Untitled') => {
+    let extractedContent = null;
+
+    try {
+        extractedContent = await extractFromHtml(html, url);
+    } catch (error) {
+        // Article extractor can fail on some pages; fallback is handled below.
+    }
+
+    if (extractedContent && extractedContent.content) {
+        const preparedContent = normalizeHtmlForMarkdown(extractedContent.content, url);
+        const contentMarkdown = turndownService.turndown(preparedContent);
+        const title = extractedContent.title || titleFallback || 'Untitled';
+
+        const markdown = `# ${title}\n\n**URL Source:** ${url}\n\n---\n\n${contentMarkdown}`;
+        return { markdown, title };
+    }
+
+    const { mainHtml, titleFromDom } = pickMainContent(html);
+    const preparedContent = normalizeHtmlForMarkdown(mainHtml || html, url);
+    const contentMarkdown = turndownService.turndown(preparedContent);
+    const title = titleFromDom || titleFallback || 'Untitled';
+
+    const markdown = `# ${title}\n\n**URL Source:** ${url}\n\n---\n\n${contentMarkdown}`;
+    return { markdown, title };
 };
 
 
@@ -119,11 +233,13 @@ try {
     // Track processed items
     let processedCount = 0;
 
+    const resolvedProxyConfiguration = proxyConfiguration?.useApifyProxy
+        ? await Actor.createProxyConfiguration(proxyConfiguration)
+        : undefined;
+
     // Create a PlaywrightCrawler
     const crawler = new PlaywrightCrawler({
-        proxyConfiguration: proxyConfiguration?.useApifyProxy
-            ? await Actor.createProxyConfiguration(proxyConfiguration)
-            : undefined,
+        proxyConfiguration: resolvedProxyConfiguration,
         
         maxRequestsPerCrawl: maxItems || undefined,
         maxConcurrency: delayBetweenRequests > 0 ? 1 : undefined,
@@ -139,107 +255,52 @@ try {
             const url = request.url;
             log.info(`Processing: ${url}`);
 
+            const proxyUrl = resolvedProxyConfiguration ? await resolvedProxyConfiguration.newUrl() : undefined;
+
             try {
-                // Wait for the page to load completely
-                await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {
-                    log.warning('Network idle timeout, continuing anyway...');
-                });
+                let result = null;
 
-                // Get the page title
-                const title = await page.title().catch(() => 'Untitled');
-
-                // Get the HTML content
-                const html = await page.content();
-
-                let markdown = '';
-                let extractedContent = null;
-
-                // Try to extract article content using article-extractor
+                // Fast path: fetch HTML and parse with Cheerio
                 try {
-                    extractedContent = await extractFromHtml(html, url);
-                } catch (error) {
-                    log.warning(`Article extraction failed for ${url} (${error.message}), falling back to full page conversion`);
-                }
-
-                // Convert to markdown
-                if (extractedContent && extractedContent.content) {
-                    const preparedContent = normalizeHtmlForMarkdown(extractedContent.content, url);
-                    const contentMarkdown = turndownService.turndown(preparedContent);
-                    
-                    markdown = `# ${extractedContent.title || title}\n\n`;
-                    markdown += `**URL Source:** ${url}\n\n`;
-                    markdown += `---\n\n`;
-                    markdown += contentMarkdown;
-
-                    log.info(`Extracted article content from: ${url}`);
-                } else {
-                    // Fallback: Try to find main content area
-                    const mainContent = await page.evaluate(() => {
-                        // Try to find main content container
-                        const selectors = [
-                            'article',
-                            'main',
-                            '[role="main"]',
-                            '.main-content',
-                            '.content',
-                            '#content',
-                            '.post-content',
-                            '.entry-content',
-                            'body',
-                        ];
-
-                        for (const selector of selectors) {
-                            const element = document.querySelector(selector);
-                            if (element) {
-                                // Remove script, style, nav, footer, aside elements
-                                const clone = element.cloneNode(true);
-                                const unwantedSelectors = [
-                                    'script',
-                                    'style',
-                                    'nav',
-                                    'footer',
-                                    'aside',
-                                    '.advertisement',
-                                    '.ads',
-                                    '.sidebar',
-                                    '.comments',
-                                    '[role="navigation"]',
-                                    '[role="complementary"]',
-                                ];
-                                
-                                unwantedSelectors.forEach(sel => {
-                                    clone.querySelectorAll(sel).forEach(el => el.remove());
-                                });
-                                
-                                return clone.innerHTML;
-                            }
-                        }
-                        return document.body.innerHTML;
+                    const response = await requestAsBrowser({
+                        url,
+                        proxyUrl,
+                        timeoutSecs: 30,
+                        ignoreSslErrors: true,
                     });
 
-                    const preparedContent = normalizeHtmlForMarkdown(mainContent || html, url);
-                    const contentMarkdown = turndownService.turndown(preparedContent);
-                    
-                    markdown = `# ${title}\n\n`;
-                    markdown += `**URL Source:** ${url}\n\n`;
-                    markdown += `---\n\n`;
-                    markdown += contentMarkdown;
-
-                    log.info(`Converted full page content from: ${url}`);
+                    if (!isBlockedResponse(response.statusCode, response.body) && response.body && response.body.length > 200) {
+                        result = await buildMarkdownFromHtml(response.body, url, turndownService);
+                        log.info('Used fast HTML fetch (Cheerio) for extraction');
+                    } else {
+                        log.warning(`Cheerio fetch looked blocked or empty (status ${response.statusCode ?? 'unknown'})`);
+                    }
+                } catch (fastError) {
+                    log.warning(`Cheerio fetch failed for ${url} (${fastError.message}), will fallback to Playwright`);
                 }
 
-                // Save to dataset
+                // Fallback: use Playwright-rendered HTML
+                if (!result) {
+                    await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {
+                        log.warning('Network idle timeout, continuing anyway...');
+                    });
+
+                    const title = await page.title().catch(() => 'Untitled');
+                    const html = await page.content();
+                    result = await buildMarkdownFromHtml(html, url, turndownService, title);
+                    log.info('Used Playwright-rendered HTML for extraction');
+                }
+
                 await Actor.pushData({
                     url,
-                    title: extractedContent?.title || title,
-                    markdown,
+                    title: result.title,
+                    markdown: result.markdown,
                     timestamp: new Date().toISOString(),
                 });
 
                 processedCount++;
                 log.info(`Progress: ${processedCount} pages processed`);
 
-                // Apply delay if specified
                 if (delayBetweenRequests > 0) {
                     log.info(`Waiting ${delayBetweenRequests} seconds before next request...`);
                     await new Promise(resolve => setTimeout(resolve, delayBetweenRequests * 1000));
@@ -248,7 +309,6 @@ try {
             } catch (error) {
                 log.error(`Failed to process ${url}: ${error.message}`);
                 
-                // Save error information
                 await Actor.pushData({
                     url,
                     title: 'Error',
