@@ -20,6 +20,7 @@
           "url": {
             "type": "string",
             "title": "URL of a web page",
+            "description": "The URL of the web page to convert to markdown",
             "format": "uri"
           }
         },
