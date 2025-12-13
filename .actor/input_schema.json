@@ -9,19 +9,13 @@
       "type": "array",
       "description": "URLs to convert to markdown",
       "editor": "requestListSources",
-      "prefill": [
-        {
-          "url": "https://docs.apify.com/api/v2"
-        }
-      ],
       "items": {
         "type": "object",
         "properties": {
           "url": {
             "type": "string",
             "title": "URL of a web page",
-            "description": "The URL of the web page to convert to markdown",
-            "format": "uri"
+            "description": "The URL of the web page to convert to markdown"
           }
         },
         "required": ["url"]
@@ -32,8 +26,7 @@
       "type": "integer",
       "description": "Maximum number of pages to process (optional)",
       "minimum": 1,
-      "editor": "number",
-      "example": 10
+      "editor": "number"
     },
     "delayBetweenRequests": {
       "title": "Delay Between Requests",
@@ -42,9 +35,7 @@
       "minimum": 0,
       "maximum": 300,
       "default": 0,
-      "prefill": 0,
-      "editor": "number",
-      "example": 2
+      "editor": "number"
     },
     "proxyConfiguration": {
       "title": "Proxy Configuration",
@@ -52,9 +43,6 @@
       "description": "Proxy settings for the scraper",
       "editor": "proxy",
       "default": {
-        "useApifyProxy": true
-      },
-      "prefill": {
         "useApifyProxy": true
       }
     }
