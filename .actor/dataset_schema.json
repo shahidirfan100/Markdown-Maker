@@ -1,0 +1,38 @@
+{
+  "actorSpecification": 1,
+  "fields": {},
+  "views": {
+    "overview": {
+      "title": "Overview",
+      "transformation": {
+        "fields": [
+          "url",
+          "title",
+          "markdown",
+          "timestamp"
+        ]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "url": {
+            "label": "URL",
+            "format": "link"
+          },
+          "title": {
+            "label": "Page Title",
+            "format": "text"
+          },
+          "markdown": {
+            "label": "Markdown Content",
+            "format": "text"
+          },
+          "timestamp": {
+            "label": "Processed At",
+            "format": "text"
+          }
+        }
+      }
+    }
+  }
+}

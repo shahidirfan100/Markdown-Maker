@@ -1,0 +1,62 @@
+{
+  "title": "Markdown Maker",
+  "description": "Convert any web page into clean, AI-ready markdown format. Perfect for feeding content to AI models, creating documentation, or archiving web content.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "startUrls": {
+      "title": "Start URLs",
+      "type": "array",
+      "description": "URLs to convert to markdown",
+      "editor": "requestListSources",
+      "prefill": [
+        {
+          "url": "https://docs.apify.com/api/v2"
+        }
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "URL of a web page",
+            "format": "uri"
+          }
+        },
+        "required": ["url"]
+      }
+    },
+    "maxItems": {
+      "title": "Maximum Number of Pages to Process",
+      "type": "integer",
+      "description": "Maximum number of pages to process (optional)",
+      "minimum": 1,
+      "editor": "number",
+      "example": 10
+    },
+    "delayBetweenRequests": {
+      "title": "Delay Between Requests",
+      "type": "integer",
+      "description": "Number of seconds to wait between processing each URL. Useful to prevent server overload or avoid rate limiting. Leave empty or set to 0 for no delay (default).",
+      "minimum": 0,
+      "maximum": 300,
+      "default": 0,
+      "prefill": 0,
+      "editor": "number",
+      "example": 2
+    },
+    "proxyConfiguration": {
+      "title": "Proxy Configuration",
+      "type": "object",
+      "description": "Proxy settings for the scraper",
+      "editor": "proxy",
+      "default": {
+        "useApifyProxy": true
+      },
+      "prefill": {
+        "useApifyProxy": true
+      }
+    }
+  },
+  "required": ["startUrls"]
+}
