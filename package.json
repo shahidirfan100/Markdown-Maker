@@ -4,12 +4,12 @@
   "description": "Convert any web page into clean, AI-ready markdown format. Perfect for feeding content to AI models, creating documentation, or archiving web content in a portable format.",
   "type": "module",
   "dependencies": {
-    "apify": "^3.4.5",
+    "apify": "^3.4.2",
     "crawlee": "^3.15.3",
     "playwright": "1.54.1",
     "cheerio": "^1.0.0-rc.12",
     "turndown": "^7.2.0",
-    "@extractus/article-extractor": "^7.4.0"
+    "@extractus/article-extractor": "^8.0.19"
   },
   "devDependencies": {
     "@apify/eslint-config": "^1.0.0",
