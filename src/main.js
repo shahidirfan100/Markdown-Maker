@@ -1,9 +1,10 @@
 // Markdown Maker - Convert web pages to clean, AI-ready markdown
 import { Actor } from 'apify';
-import { PlaywrightCrawler, requestAsBrowser } from 'crawlee';
+import { PlaywrightCrawler } from 'crawlee';
 import TurndownService from 'turndown';
 import { extractFromHtml } from '@extractus/article-extractor';
 import { load } from 'cheerio';
+import { gotScraping } from 'got-scraping';
 
 const normalizeHtmlForMarkdown = (html, baseUrl) => {
     const $ = load(html || '', { decodeEntities: false });
@@ -262,18 +263,20 @@ try {
 
                 // Fast path: fetch HTML and parse with Cheerio
                 try {
-                    const response = await requestAsBrowser({
+                    const response = await gotScraping({
                         url,
                         proxyUrl,
-                        timeoutSecs: 30,
-                        ignoreSslErrors: true,
+                        timeout: { request: 30000 },
+                        https: { rejectUnauthorized: false },
                     });
 
-                    if (!isBlockedResponse(response.statusCode, response.body) && response.body && response.body.length > 200) {
-                        result = await buildMarkdownFromHtml(response.body, url, turndownService);
+                    const { statusCode, body } = response;
+
+                    if (!isBlockedResponse(statusCode, body) && body && body.length > 200) {
+                        result = await buildMarkdownFromHtml(body, url, turndownService);
                         log.info('Used fast HTML fetch (Cheerio) for extraction');
                     } else {
-                        log.warning(`Cheerio fetch looked blocked or empty (status ${response.statusCode ?? 'unknown'})`);
+                        log.warning(`Cheerio fetch looked blocked or empty (status ${statusCode ?? 'unknown'})`);
                     }
                 } catch (fastError) {
                     log.warning(`Cheerio fetch failed for ${url} (${fastError.message}), will fallback to Playwright`);

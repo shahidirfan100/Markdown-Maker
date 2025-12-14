@@ -9,7 +9,8 @@
     "playwright": "1.54.1",
     "cheerio": "^1.0.0-rc.12",
     "turndown": "^7.2.0",
-    "@extractus/article-extractor": "^8.0.19"
+    "@extractus/article-extractor": "^8.0.19",
+    "got-scraping": "^4.1.2"
   },
   "devDependencies": {
     "@apify/eslint-config": "^1.0.0",
