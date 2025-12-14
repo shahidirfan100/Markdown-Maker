@@ -1,10 +1,11 @@
 // Markdown Maker - Convert web pages to clean, AI-ready markdown
 import { Actor } from 'apify';
-import { PlaywrightCrawler } from 'crawlee';
+import { BasicCrawler } from 'crawlee';
 import TurndownService from 'turndown';
 import { extractFromHtml } from '@extractus/article-extractor';
 import { load } from 'cheerio';
 import { gotScraping } from 'got-scraping';
+import { chromium } from 'playwright';
 
 const normalizeHtmlForMarkdown = (html, baseUrl) => {
     const $ = load(html || '', { decodeEntities: false });
@@ -238,21 +239,13 @@ try {
         ? await Actor.createProxyConfiguration(proxyConfiguration)
         : undefined;
 
-    // Create a PlaywrightCrawler
-    const crawler = new PlaywrightCrawler({
-        proxyConfiguration: resolvedProxyConfiguration,
-        
+    const crawler = new BasicCrawler({
         maxRequestsPerCrawl: maxItems || undefined,
-        maxConcurrency: delayBetweenRequests > 0 ? 1 : undefined,
+        maxConcurrency: delayBetweenRequests > 0 ? 1 : 5,
+        maxRequestRetries: 1,
+        requestHandlerTimeoutSecs: 90,
 
-        // Use headless browser for JavaScript-heavy sites
-        launchContext: {
-            launchOptions: {
-                headless: true,
-            },
-        },
-
-        async requestHandler({ page, request, log }) {
+        async requestHandler({ request, log }) {
             const url = request.url;
             log.info(`Processing: ${url}`);
 
@@ -282,16 +275,26 @@ try {
                     log.warning(`Cheerio fetch failed for ${url} (${fastError.message}), will fallback to Playwright`);
                 }
 
-                // Fallback: use Playwright-rendered HTML
+                // Fallback: use Playwright-rendered HTML (single-page browser to avoid navigation loops)
                 if (!result) {
-                    await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {
-                        log.warning('Network idle timeout, continuing anyway...');
+                    const browser = await chromium.launch({
+                        headless: true,
+                        proxy: proxyUrl ? { server: proxyUrl } : undefined,
                     });
 
-                    const title = await page.title().catch(() => 'Untitled');
-                    const html = await page.content();
-                    result = await buildMarkdownFromHtml(html, url, turndownService, title);
-                    log.info('Used Playwright-rendered HTML for extraction');
+                    try {
+                        const page = await browser.newPage();
+                        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+
+                        const title = await page.title().catch(() => 'Untitled');
+                        const html = await page.content();
+                        result = await buildMarkdownFromHtml(html, url, turndownService, title);
+                        log.info('Used Playwright-rendered HTML for extraction');
+                        await page.close().catch(() => {});
+                    } finally {
+                        await browser.close().catch(() => {});
+                    }
                 }
 
                 await Actor.pushData({
