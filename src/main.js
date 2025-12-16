@@ -200,6 +200,13 @@ try {
         proxyConfiguration = { useApifyProxy: true },
     } = input;
 
+    // Initialize statistics tracking for QA
+    const stats = {
+        processedPages: 0,
+        failedPages: 0,
+        startTime: new Date(),
+    };
+
     console.log('Starting Markdown Maker...');
     console.log(`Processing ${startUrls.length} URLs`);
     if (maxItems) {
@@ -233,7 +240,6 @@ try {
     });
 
     // Track processed items
-    let processedCount = 0;
 
     const resolvedProxyConfiguration = proxyConfiguration?.useApifyProxy
         ? await Actor.createProxyConfiguration(proxyConfiguration)
@@ -297,15 +303,19 @@ try {
                     }
                 }
 
+                // Push data with all required metadata for QA
                 await Actor.pushData({
                     url,
-                    title: result.title,
+                    title: result.title || 'Untitled',
                     markdown: result.markdown,
                     timestamp: new Date().toISOString(),
+                    scrapedAt: new Date().toISOString(),
+                    success: true,
                 });
 
-                processedCount++;
-                log.info(`Progress: ${processedCount} pages processed`);
+                stats.processedPages++;
+                log.info(`✓ Successfully processed: ${url}`);
+                log.info(`Progress: ${stats.processedPages} pages processed, ${stats.failedPages} failed`)
 
                 if (delayBetweenRequests > 0) {
                     log.info(`Waiting ${delayBetweenRequests} seconds before next request...`);
@@ -313,28 +323,59 @@ try {
                 }
 
             } catch (error) {
-                log.error(`Failed to process ${url}: ${error.message}`);
+                stats.failedPages++;
+                log.error(`✗ Failed to process ${url}: ${error.message}`);
                 
+                // Push error data with consistent structure
                 await Actor.pushData({
                     url,
                     title: 'Error',
                     markdown: `# Error Processing Page\n\n**URL:** ${url}\n\n**Error:** ${error.message}`,
                     timestamp: new Date().toISOString(),
-                    error: true,
+                    scrapedAt: new Date().toISOString(),
+                    success: false,
+                    errorMessage: error.message,
                 });
             }
         },
 
         failedRequestHandler({ request, log }) {
-            log.error(`Request failed after retries: ${request.url}`);
+            stats.failedPages++;
+            log.error(`✗ Request failed after retries: ${request.url}`);
+            log.error(`Retry count: ${request.retryCount}`);
         },
     });
 
     // Run the crawler
     await crawler.run(startUrls);
 
+    // Calculate final statistics
+    const endTime = new Date();
+    const duration = (endTime - stats.startTime) / 1000; // in seconds
+    const totalPages = stats.processedPages + stats.failedPages;
+    const successRate = totalPages > 0 ? ((stats.processedPages / totalPages) * 100).toFixed(2) : 0;
+
+    // Log comprehensive statistics for QA validation
+    console.log('\n' + '='.repeat(60));
     console.log('Markdown Maker completed successfully!');
-    console.log(`Total pages processed: ${processedCount}`);
+    console.log('='.repeat(60));
+    console.log(`Total pages processed: ${stats.processedPages}`);
+    console.log(`Failed pages: ${stats.failedPages}`);
+    console.log(`Success rate: ${successRate}%`);
+    console.log(`Duration: ${duration.toFixed(2)} seconds`);
+    console.log(`Average time per page: ${totalPages > 0 ? (duration / totalPages).toFixed(2) : 0} seconds`);
+    console.log('='.repeat(60) + '\n');
+
+    // Set output metadata for Apify platform
+    await Actor.setValue('OUTPUT', {
+        stats: {
+            processedPages: stats.processedPages,
+            failedPages: stats.failedPages,
+            totalPages,
+            successRate: parseFloat(successRate),
+            durationSeconds: duration,
+        },
+    });
 
 } catch (error) {
     console.error('Actor failed:', error.message);

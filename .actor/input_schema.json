@@ -9,6 +9,11 @@
       "type": "array",
       "description": "URLs to convert to markdown",
       "editor": "requestListSources",
+      "prefill": [
+        {
+          "url": "https://apify.com/shahidirfan/dice-job-scraper"
+        }
+      ],
       "items": {
         "type": "object",
         "properties": {
